@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+rapidocr-onnxruntime
+opencv-python-headless
+numpy
+pillow
+cachetools
+python-multipart

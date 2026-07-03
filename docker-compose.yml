@@ -1,0 +1,37 @@
+services:
+
+  # OCR Service (RapidOCR + ONNX Runtime)
+  ocr-service:
+    build: ./ocr-service
+    container_name: recipe-ocr
+    restart: unless-stopped
+    ports:
+      - "8090:8080"
+    environment:
+      OCR_THREADS: "8"
+      OMP_NUM_THREADS: "8"
+      ORT_NUM_THREADS: "8"
+
+  # Ollama
+  ollama:
+    image: ollama/ollama
+    container_name: recipe-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  # LLM Service
+  llm-service:
+    build: ./llm-service
+    container_name: recipe-llm
+    restart: unless-stopped
+    ports:
+      - "8091:8081"
+    depends_on:
+      - ocr-service
+      - ollama
+
+volumes:
+  ollama_data:
