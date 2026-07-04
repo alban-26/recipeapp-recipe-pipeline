@@ -5,20 +5,30 @@ from tenacity import retry, stop_after_attempt, wait_fixed
 log = structlog.get_logger()
 
 OLLAMA_URL = "http://ollama:11434/api/generate"
-MODEL = "qwen2.5:0.5b"
+
+# Empfehlung:
+# qwen2.5:3b oder qwen2.5:7b liefern deutlich stabilere Ergebnisse.
+MODEL = "qwen2.5:1.5b"
 
 SYSTEM_PROMPT = """
 Du bist ein Parser für Kochrezepte.
 
-Extrahiere aus dem OCR-Text genau ein Rezept.
+Deine Aufgabe:
+Extrahiere aus dem OCR-Text genau EIN Rezept.
 
 Antworte ausschließlich mit gültigem JSON.
-Keine Markdown-Blöcke.
-Keine Erklärungen.
-Keine Kommentare.
-Kein zusätzlicher Text.
 
-Das JSON muss exakt dieses Schema besitzen:
+WICHTIG:
+
+- Keine Markdown-Blöcke.
+- Keine Erklärungen.
+- Keine Kommentare.
+- Kein Text vor dem JSON.
+- Kein Text nach dem JSON.
+- Das JSON muss direkt mit { beginnen und mit } enden.
+- Das JSON muss vollständig parsebar sein.
+
+Das JSON muss EXAKT dieses Schema besitzen:
 
 {
   "name": "string",
@@ -38,22 +48,155 @@ Das JSON muss exakt dieses Schema besitzen:
 
 Regeln:
 
-- "name" ist der Rezeptname.
+- "name" ist ausschließlich der Rezeptname.
 - "portions" ist die Anzahl der Portionen als Integer.
 - "duration" ist die gesamte Kochzeit in Minuten.
-- "quantity" enthält ausschließlich die Zahl.
-- "unit" enthält ausschließlich die Einheit (g, kg, ml, EL, TL, Stück usw.).
-- "name" enthält ausschließlich den Namen der Zutat.
-- Falls quantity, unit, portions oder duration nicht vorhanden sind, verwende null.
-- "instructions" enthält jeden Kochschritt als einzelnen Listeneintrag.
+- Falls portions oder duration unbekannt sind, verwende null.
+
+Für Zutaten gilt:
+
+- quantity enthält ausschließlich die Zahl.
+- unit enthält ausschließlich eine erlaubte Einheit oder null.
+- name enthält ausschließlich den Namen der Zutat.
+- Mengen oder Einheiten dürfen niemals im Namen stehen.
+- Falls keine Menge vorhanden ist:
+  - quantity = null
+  - unit = null
+
+Erlaubte Einheiten:
+
+g
+kg
+mg
+µg
+lb
+oz
+ml
+l
+cl
+dl
+fl oz
+pt
+qt
+gal
+TL
+EL
+Tasse
+Shot
+Stück
+Scheibe
+Blatt
+Zehe
+Prise
+Schuss
+Tropfen
+Packung
+Dose
+Glas
+Bund
+Zweig
+
+Falls eine Einheit nicht exakt einer erlaubten Einheit entspricht:
+- unit = null
+
+Beispiele:
+
+"500 g Mehl"
+
+{
+  "quantity": 500,
+  "unit": "g",
+  "name": "Mehl"
+}
+
+"2 Eier"
+
+{
+  "quantity": 2,
+  "unit": "Stück",
+  "name": "Ei"
+}
+
+"Salz"
+
+{
+  "quantity": null,
+  "unit": null,
+  "name": "Salz"
+}
+
+Anweisungen:
+
+- Jeder Kochschritt ist ein eigener Listeneintrag.
+- Reihenfolge beibehalten.
+- Keine Nummerierung.
+- Keine leeren Einträge.
+
+Allgemeine Regeln:
+
+- Fehlende Werte werden mit null angegeben.
+- Erfinde niemals Informationen.
 - Gib niemals zusätzliche Felder zurück.
 """
+
+
+JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {
+            "type": "string"
+        },
+        "portions": {
+            "type": ["integer", "null"]
+        },
+        "duration": {
+            "type": ["integer", "null"]
+        },
+        "ingredients": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "quantity": {
+                        "type": ["number", "null"]
+                    },
+                    "unit": {
+                        "type": ["string", "null"]
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "quantity",
+                    "unit",
+                    "name"
+                ],
+                "additionalProperties": False
+            }
+        },
+        "instructions": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        }
+    },
+    "required": [
+        "name",
+        "portions",
+        "duration",
+        "ingredients",
+        "instructions"
+    ],
+    "additionalProperties": False
+}
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
 async def call_llm(ocr_text: str) -> str:
     """
-    Sends OCR text to Ollama and returns the generated JSON string.
+    Send OCR text to Ollama and return the extracted recipe JSON.
     """
 
     prompt = f"""
@@ -73,7 +216,8 @@ JSON:
                 "model": MODEL,
                 "prompt": prompt,
                 "stream": False,
-                "format": "json",
+                "temperature": 0,
+                "format": JSON_SCHEMA,
                 "options": {
                     "temperature": 0,
                 },
