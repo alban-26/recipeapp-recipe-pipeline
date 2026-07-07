@@ -8,7 +8,7 @@ OLLAMA_URL = "http://ollama:11434/api/generate"
 
 # Empfehlung:
 # qwen2.5:3b oder qwen2.5:7b liefern deutlich stabilere Ergebnisse.
-MODEL = "qwen2.5:1.5b"
+MODEL = "qwen2.5:0.5b"
 
 SYSTEM_PROMPT = """
 Du bist ein Parser für Kochrezepte.
@@ -214,12 +214,29 @@ JSON:
             OLLAMA_URL,
             json={
                 "model": MODEL,
-                "prompt": prompt,
+
+                "system": SYSTEM_PROMPT,
+
+                "prompt": ocr_text,
+
                 "stream": False,
-                "temperature": 0,
+
                 "format": JSON_SCHEMA,
+
+                "keep_alive": "2h",
+
                 "options": {
                     "temperature": 0,
+
+                    # Geschwindigkeit
+                    "num_predict": 500,
+                    "num_ctx": 1024,
+
+                    # i5-10210U
+                    "num_thread": 4,
+
+                    "top_k": 1,
+                    "top_p": 0.1,
                 },
             },
         )
